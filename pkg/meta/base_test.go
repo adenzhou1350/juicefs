@@ -1399,13 +1399,24 @@ func testMetaClient(t *testing.T, m Meta) {
 		t.Fatalf("unlink f3: %s", st)
 	}
 	var i int
+	var lastRead syscall.Errno
 	for i = 0; i < 200; i++ {
-		if st := m.Read(ctx, inode, 0, &slices); st == syscall.ENOENT {
+		lastRead = m.Read(ctx, inode, 0, &slices)
+		if lastRead == syscall.ENOENT {
 			break
 		}
 		time.Sleep(time.Millisecond * 100)
 	}
 	if i >= 200 {
+		// Observe only after the original polling deadline has failed.
+		b := m.getBase()
+		cached, cacheHit := b.of.ReadChunk(inode, 0)
+		raw, rawStatus := b.en.doRead(ctx, inode, 0)
+		b.Lock()
+		removed := b.removedFiles[inode]
+		b.Unlock()
+		t.Logf("cleanup diagnostic: inode=%d lastRead=%s slices=%d cacheHit=%t cachedSlices=%d rawRead=%s rawSlices=%d removedFiles=%t pendingSliceDeletes=%d",
+			inode, lastRead, len(slices), cacheHit, len(cached), rawStatus, len(raw), removed, len(b.dslices))
 		var attr Attr
 		stLookup := m.Lookup(ctx, 1, "f", &inode, &attr, false)
 		stGetAttr := m.GetAttr(ctx, inode, &attr)
