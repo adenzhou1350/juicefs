@@ -1,0 +1,38 @@
+name: PR 7832 isolated race validation
+on:
+  push:
+    branches: [codex/juicefs7832-validation-20261125]
+permissions:
+  contents: read
+jobs:
+  race:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.10'
+          cache: true
+      - name: Check formatting
+        run: test -z "$(gofmt -l pkg/fs/object.go pkg/fs/object_test.go pkg/object/object_storage.go)"
+      - name: Current-main negative control
+        shell: bash
+        run: |
+          git show d4f2cf81cdb26353cf7b105405086270e3050c4b:pkg/fs/object.go > pkg/fs/object.go
+          git show d4f2cf81cdb26353cf7b105405086270e3050c4b:pkg/object/object_storage.go > pkg/object/object_storage.go
+          set +e
+          go test -race ./pkg/fs -run '^TestReloadableStorageConcurrent' -count=1 -timeout=5m > "$RUNNER_TEMP/baseline.log" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/baseline.log"
+          test "$result" -ne 0
+          grep -q 'WARNING: DATA RACE' "$RUNNER_TEMP/baseline.log"
+      - name: Restored candidate regression and upstream encrypted-config test
+        shell: bash
+        run: |
+          git restore pkg/fs/object.go pkg/object/object_storage.go
+          go test -race ./pkg/fs -run '^TestReloadableStorage' -count=5 -timeout=5m
